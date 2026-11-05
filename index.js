@@ -47,22 +47,24 @@ export function apply(ctx) {
   const cache = new Map()
   /** @type {Promise<void> | undefined} */
   let loading
+  /** Serialize UI mutations so concurrent edits cannot overwrite each other. */
+  let mutationQueue = Promise.resolve()
 
   /* ------------------------------- persistence ------------------------------ */
 
-  const persist = () =>
+  const serializeMutation = (operation) => {
+    const task = mutationQueue.then(operation)
+    mutationQueue = task.then(() => undefined, () => undefined)
+    return task
+  }
+
+  const serializedSites = (source) =>
+    [...source.values()].map(({ id, name, baseUrl, token, createdAt }) => ({ id, name, baseUrl, token, createdAt }))
+
+  const persistState = async (nextSites, nextActiveId) =>
     ctx.credentials.modifyRecord(RECORD_KEY, async () => ({
       kind: 'grant',
-      payload: {
-        activeId: meta.activeId,
-        sites: [...sites.values()].map(({ id, name, baseUrl, token, createdAt }) => ({
-          id,
-          name,
-          baseUrl,
-          token,
-          createdAt,
-        })),
-      },
+      payload: { activeId: nextActiveId, sites: serializedSites(nextSites) },
     }))
 
   const load = () => {
@@ -73,7 +75,10 @@ export function apply(ctx) {
         const stored = payload && Array.isArray(payload.sites) ? payload.sites : []
         for (const candidate of stored) {
           const site = normalizeSite(candidate)
-          if (site !== null) sites.set(site.id, site)
+          if (site !== null) {
+             sites.set(site.id, site)
+             siteRevisions.set(site.id, 0)
+           }
         }
         const active = payload && typeof payload.activeId === 'string' ? payload.activeId : null
         if (active !== null && sites.has(active)) meta.activeId = active
@@ -116,7 +121,7 @@ export function apply(ctx) {
       response = await fetch(url, {
         method: 'GET',
         headers,
-        redirect: 'follow',
+        redirect: 'error',
         signal: AbortSignal.timeout(timeoutMs),
       })
     } catch (error) {
@@ -293,6 +298,31 @@ export function apply(ctx) {
     }
   }
 
+  /** @type {Map<string, Promise<object>>} */
+  const snapshotRequests = new Map()
+  /** @type {Map<string, Promise<object>>} */
+  const headRequests = new Map()
+  /** @type {Map<string, Promise<object>>} */
+  const detailRequests = new Map()
+  /** Revision invalidates requests after an existing site's URL/token is edited. */
+  const siteRevisions = new Map()
+
+  const collectHeadOnce = (site, key) => {
+    const running = headRequests.get(key)
+    if (running !== undefined) return running
+    const request = collectHead(site).finally(() => headRequests.delete(key))
+    headRequests.set(key, request)
+    return request
+  }
+
+  const collectDetailsOnce = (site, windows, key) => {
+    const running = detailRequests.get(key)
+    if (running !== undefined) return running
+    const request = collectDetails(site, windows).finally(() => detailRequests.delete(key))
+    detailRequests.set(key, request)
+    return request
+  }
+
   /**
    * Snapshot for one site: the head is awaited, the details are a background
    * fill the Client picks up on its next poll.
@@ -300,31 +330,59 @@ export function apply(ctx) {
    * @param {{days: {start: number, end: number}[], monthStart: number}} windows
    * @param {boolean} force
    */
-  async function snapshotOf(site, windows, force) {
-    const key = `${site.id}|${windows.days[0]?.start ?? 0}|${windows.days.length}|${windows.monthStart}`
+  function snapshotOf(site, windows, force) {
+    const revision = siteRevisions.get(site.id) ?? 0
+    const dayKey = windows.days.map(({ start, end }) => `${start}:${end}`).join(',')
+    const key = `${site.id}|${revision}|${dayKey}|${windows.monthStart}`
+    const running = snapshotRequests.get(key)
+    if (running !== undefined) return running
+    const request = refreshSnapshot(site, windows, force, revision, key).finally(() => {
+      if (snapshotRequests.get(key) === request) snapshotRequests.delete(key)
+    })
+    snapshotRequests.set(key, request)
+    return request
+  }
+
+  async function refreshSnapshot(site, windows, force, revision, key) {
     const cached = cache.get(key)
-    if (!force && cached !== undefined && Date.now() - cached.at < CACHE_TTL_MS) return buildSnapshot(site, cached)
+    const fresh = cached !== undefined && Date.now() - cached.at < CACHE_TTL_MS
+    if (!force && fresh) return buildSnapshot(site, cached)
 
     let entry = cached
-    if (entry === undefined || force) {
+    if (entry === undefined || force || !fresh) {
+      const head = await collectHeadOnce(site, `${site.id}|${revision}|head`)
       entry = {
-        head: await collectHead(site),
-        details: entry === undefined ? null : entry.details,
+        head,
+        details: null,
         at: Date.now(),
         running: false,
       }
+      if (siteRevisions.get(site.id) !== revision || sites.get(site.id)?.token !== site.token || sites.get(site.id)?.baseUrl !== site.baseUrl) {
+        return buildSnapshot(site, entry)
+      }
+      // Keep other valid windows for this site; remove only obsolete credential
+      // revisions, otherwise a second window evicts the ordinary dashboard cache.
       for (const existing of [...cache.keys()]) {
-        if (existing.startsWith(`${site.id}|`)) cache.delete(existing)
+        if (existing.startsWith(`${site.id}|`) && !existing.startsWith(`${site.id}|${revision}|`)) cache.delete(existing)
       }
       cache.set(key, entry)
+      // Bound cache growth if a Client submits many distinct date windows.
+      const siteKeys = [...cache.keys()].filter((candidate) => candidate.startsWith(`${site.id}|${revision}|`))
+      while (siteKeys.length > 16) {
+        const oldest = siteKeys.shift()
+        if (oldest !== key) cache.delete(oldest)
+      }
     }
 
-    const stale = force || entry.details === null
+    const stale = force || !fresh || entry.details === null
     if (entry.head.error === null && !entry.running && stale) {
       const target = entry
+      const targetRevision = revision
       target.running = true
-      void collectDetails(site, windows)
+      void collectDetailsOnce(site, windows, `${key}|details`)
         .then((details) => {
+          // Drop results from a request whose site was edited or removed while running.
+          if (siteRevisions.get(site.id) !== targetRevision || sites.get(site.id)?.token !== site.token || sites.get(site.id)?.baseUrl !== site.baseUrl) return
           target.details = details
           target.at = Date.now()
         })
@@ -401,13 +459,17 @@ export function apply(ctx) {
     if (name === '') name = new URL(baseUrl).host
 
     if (existing !== undefined) {
-      existing.name = name
-      existing.baseUrl = baseUrl
-      if (token !== '') existing.token = token
-      if (existing.token === '') throw new Error('访问令牌不能为空')
-      cache.clear()
-      await persist()
-      return { id: existing.id }
+      const updated = { ...existing, name, baseUrl, token: token || existing.token }
+      if (updated.token === '') throw new Error('访问令牌不能为空')
+      const nextSites = new Map(sites)
+      nextSites.set(updated.id, updated)
+      await persistState(nextSites, meta.activeId)
+      sites.set(updated.id, updated)
+      siteRevisions.set(updated.id, (siteRevisions.get(updated.id) ?? 0) + 1)
+      for (const key of [...cache.keys()]) {
+        if (key.startsWith(`${updated.id}|`)) cache.delete(key)
+      }
+      return { id: updated.id }
     }
 
     if (token === '') throw new Error('访问令牌不能为空')
@@ -418,28 +480,36 @@ export function apply(ctx) {
       token,
       createdAt: Date.now(),
     }
+    const nextSites = new Map(sites)
+    nextSites.set(created.id, created)
+    const nextActiveId = created.id
+    await persistState(nextSites, nextActiveId)
     sites.set(created.id, created)
-    meta.activeId = created.id
-    await persist()
+    meta.activeId = nextActiveId
     return { id: created.id }
   }
 
   /** @param {unknown} id */
   async function removeOp(id) {
-    if (typeof id !== 'string' || !sites.delete(id)) throw new Error('找不到要删除的站点')
+    if (typeof id !== 'string' || !sites.has(id)) throw new Error('找不到要删除的站点')
+    const nextSites = new Map(sites)
+    nextSites.delete(id)
+    const nextActiveId = meta.activeId === id ? nextSites.keys().next().value ?? null : meta.activeId
+    await persistState(nextSites, nextActiveId)
+    sites.delete(id)
+    siteRevisions.set(id, (siteRevisions.get(id) ?? 0) + 1)
+    meta.activeId = nextActiveId
     for (const key of [...cache.keys()]) {
       if (key.startsWith(`${id}|`)) cache.delete(key)
     }
-    if (meta.activeId === id) meta.activeId = sites.keys().next().value ?? null
-    await persist()
     return {}
   }
 
   /** @param {unknown} id */
   async function activateOp(id) {
     if (typeof id !== 'string' || !sites.has(id)) throw new Error('找不到该站点')
+    await persistState(sites, id)
     meta.activeId = id
-    await persist()
     return {}
   }
 
@@ -463,13 +533,13 @@ export function apply(ctx) {
         case 'state':
           return json(await stateOp(body.force === true, body.windows))
         case 'save':
-          await saveOp(body.site && typeof body.site === 'object' ? body.site : {})
+          await serializeMutation(() => saveOp(body.site && typeof body.site === 'object' ? body.site : {}))
           return json(listState())
         case 'remove':
-          await removeOp(body.id)
+          await serializeMutation(() => removeOp(body.id))
           return json(listState())
         case 'activate':
-          await activateOp(body.id)
+          await serializeMutation(() => activateOp(body.id))
           return json(listState())
         default:
           return json({ error: 'unknown op' }, 400)
@@ -577,7 +647,7 @@ function normalizeBaseUrl(input) {
     return null
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
-  if (url.hostname === '') return null
+  if (url.hostname === '' || url.username !== '' || url.password !== '') return null
   url.search = ''
   url.hash = ''
   return url.origin + (url.pathname === '/' ? '' : url.pathname.replace(/\/+$/, ''))
@@ -616,7 +686,7 @@ function readWindows(input) {
     const window = /** @type {Record<string, unknown>} */ (item)
     const start = numberOrNull(window.start)
     const end = numberOrNull(window.end)
-    if (start === null || end === null || end <= start) continue
+    if (start === null || end === null || end <= start || end - start > 86400) continue
     days.push({ start: Math.floor(start), end: Math.floor(end) })
   }
   if (days.length === 0) return fallback
@@ -628,12 +698,15 @@ function readWindows(input) {
 
 function defaultWindows() {
   const now = new Date()
-  const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime() / 1000
-  const today = startOfDay(now)
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const days = []
   for (let offset = DEFAULT_TREND_DAYS - 1; offset >= 0; offset -= 1) {
-    const start = today - offset * 86400
-    days.push({ start, end: start + 86400 })
+    const startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() - offset)
+    const endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() - offset + 1)
+    days.push({ start: startDate.getTime() / 1000, end: endDate.getTime() / 1000 })
   }
-  return { days, monthStart: new Date(now.getFullYear(), now.getMonth(), 1).getTime() / 1000 }
+  return {
+    days,
+    monthStart: new Date(now.getFullYear(), now.getMonth(), 1).getTime() / 1000,
+  }
 }

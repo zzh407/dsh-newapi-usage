@@ -1,6 +1,6 @@
 {
   "name": "dsh-newapi-usage",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A DSH Web plugin for viewing NewAPI relay-site balance and usage.",
   "engines": { "node": ">=20" },
   "type": "module",

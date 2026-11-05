@@ -36,7 +36,7 @@ Restart the DSH Web process if the CLI asks for it. The plugin adds a **NewAPI U
 1. Open **NewAPI Usage** from the sidebar.
 2. Choose **Sites** and **Add site**.
 3. Enter a display name (optional), the site URL (for example `https://newapi.example.com`), and a System Access Token.
-4. Save. The panel validates access when it loads usage; a site-specific error is shown if the token or URL is rejected.
+4. Save. The panel tests access as it loads usage; a site-specific error is shown if the token or URL is rejected. Site endpoints must respond directly: HTTP redirects are rejected so the access token cannot be forwarded to another origin.
 5. Add further sites through **Sites**. Select a site chip to switch the dashboard.
 
 The token field is write-only from the UI: the saved value is not sent back to the browser. Existing sites can be edited without entering a new token; leave the token field blank to retain it. To rotate a token, enter the replacement while editing the site.
@@ -46,7 +46,7 @@ The token field is write-only from the UI: the saved value is not sent back to t
 - Site names, URLs, and tokens are stored in a DSH credential record named `newapi-usage/sites` in the local DSH home. The credential file is managed by DSH and is not part of this repository.
 - The Client sends dashboard requests to the local authenticated DSH connection route. Only the Host contacts configured NewAPI sites.
 - The plugin does not include analytics, telemetry, or a third-party proxy.
-- Requests sent to a NewAPI site include its configured access token in the `Authorization` header. Only add sites you trust and use tokens with the minimum permissions needed to read your own account and usage.
+- Requests sent to a NewAPI site include its configured access token in the `Authorization` header. Redirects are disabled, preventing a token from being forwarded to a different origin. Only add sites you trust and use tokens with the minimum permissions needed to read your own account and usage.
 - NewAPI servers may vary by version or operator configuration. Optional usage, status, or token endpoints can be unavailable; partial failures are reported in the panel.
 
 ## Usage definitions
