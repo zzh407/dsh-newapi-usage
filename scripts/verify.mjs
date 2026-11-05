@@ -67,6 +67,11 @@ assert.match(patch, new RegExp(`name: '?${packageName.replace(/[.*+?^${}()|[\]\\
 assert.match(client, new RegExp(`id: '${packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`))
 assert.match(readme, /MIT/i)
 assert.match(readme, /public repository/i)
+assert.match(readme, /简体中文/)
+assert.match(readme, /README\.en\.md/)
+const englishReadme = await readFile(new URL('../README.en.md', import.meta.url), 'utf8')
+assert.match(englishReadme, /\[简体中文\]\(README\.md\)/)
+assert.ok(packageJson.files.includes('README.en.md'), 'English documentation must be included in the package')
 
 const { apply, inject } = await import('../index.js')
 assert.deepEqual(inject, ['credentials', 'connection'])

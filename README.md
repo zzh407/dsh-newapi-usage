@@ -1,77 +1,102 @@
-# NewAPI Usage for DSH
+# NewAPI 用量面板 · DSH 插件
 
-A DeepSeek Harness Web plugin for monitoring one or more [NewAPI](https://github.com/QuantumNous/new-api) sites. Add a site URL and a NewAPI **System Access Token** in the panel to see account balance and usage without putting the token in the plugin configuration or browser bundle.
+**简体中文** | [English](README.en.md)
 
-## Features
+在 DeepSeek Harness（DSH）Web 界面中查看一个或多个 [NewAPI](https://github.com/QuantumNous/new-api) 站点的账户余额与用量。只需在面板中填写**站点地址和系统访问令牌**，无需把令牌写入插件配置或浏览器代码。
 
-- Sidebar panel with balance, total spent, request count, today's spending, current-month spending, and RPM/TPM.
-- Seven-day daily spending chart and per-token (API key) usage details.
-- Multiple sites with independent credentials and a site switcher.
-- Automatically reads the site's quota conversion rate and currency symbol from `/api/status`; falls back to 500,000 quota units per currency unit when unavailable.
-- Keeps tokens in DSH's local credential store and only displays a masked token hint.
-- Fetches NewAPI APIs from the DSH Host, avoiding browser CORS restrictions and keeping site tokens out of Client code.
+## 功能
 
-## Compatibility
+- **账户概览**：余额、累计消费、累计请求次数、今日消费、本月消费和 RPM/TPM。
+- **近 7 天消费图表**：按天查看消费变化。
+- **令牌明细**：查看各 API Key 的已用额度、剩余额度、无限额度标记和状态。
+- **多站点管理**：添加、编辑、删除站点，独立保存凭据，快速切换查看。
+- **自动换算金额**：从 `/api/status` 读取额度倍率与货币符号；无法读取时使用每单位货币 500,000 quota 的默认倍率。
+- **凭据本地保存**：令牌保存在 DSH 凭据存储中，界面只显示脱敏提示，不回传已保存的完整令牌。
+- **Host 端请求**：由 DSH Host 访问站点 API，避免浏览器跨域限制，不在 Client 插件代码中嵌入令牌。
 
-- DeepSeek Harness Web profile with the Web UI, connection, credential, layout, and sidebar services enabled.
-- NewAPI-compatible management endpoints:
+## 兼容要求
+
+- 使用 DSH 的 **Web profile**，并启用 Web UI、Connection、Credentials、Layout 和 Sidebar 等服务。
+- 站点提供以下 NewAPI 管理接口：
   - `GET /api/status`
   - `GET /api/user/self`
   - `GET /api/log/self/stat`
   - `GET /api/token/`
-- Provide a NewAPI System Access Token (often prefixed `nap_`) or a compatible legacy access token. An OpenAI-compatible relay key such as `sk-...` cannot access the management API.
+- 使用 NewAPI 的**系统访问令牌**（通常以 `nap_` 开头），或兼容的旧版 AccessToken。用于模型调用的 `sk-...` 中继密钥不能代替管理接口的访问令牌。
 
-## Install
+不同版本或二次开发站点的接口可能有所差异；部分统计或令牌接口不可用时，面板会显示相关错误或警告。
 
-Install from this GitHub repository with the DSH plugin CLI:
+## 安装
+
+通过 DSH 插件命令从 GitHub 安装：
 
 ```sh
 npx -p @deepseek-ai/dsh dsh plugin --profile web add github:zzh407/dsh-newapi-usage
 ```
 
-Restart the DSH Web process if the CLI asks for it. The plugin adds a **NewAPI Usage** entry to the sidebar.
+如果命令提示需要重启，请重新启动 DSH Web 进程。安装后，侧边栏中会出现 **NewAPI 用量** 入口。
 
-## Configure
+## 配置与使用
 
-1. Open **NewAPI Usage** from the sidebar.
-2. Choose **Sites** and **Add site**.
-3. Enter a display name (optional), the site URL (for example `https://newapi.example.com`), and a System Access Token.
-4. Save. The panel tests access as it loads usage; a site-specific error is shown if the token or URL is rejected. Site endpoints must respond directly: HTTP redirects are rejected so the access token cannot be forwarded to another origin.
-5. Add further sites through **Sites**. Select a site chip to switch the dashboard.
+1. 点击侧边栏中的 **NewAPI 用量**。
+2. 点击 **站点管理 → 添加站点**。
+3. 填入站点名称（可选）、站点地址（如 `https://newapi.example.com`）和系统访问令牌。
+4. 点击 **保存**。面板加载用量时会尝试访问站点；地址或令牌被拒绝时会显示错误。
+5. 重复以上操作添加其他站点，通过面板顶部的站点按钮切换查看。
 
-The token field is write-only from the UI: the saved value is not sent back to the browser. Existing sites can be edited without entering a new token; leave the token field blank to retain it. To rotate a token, enter the replacement while editing the site.
+> **访问令牌从哪里获取？** 通常可在 NewAPI 控制台的「个人设置 → 系统访问令牌」中生成。具体入口以站点实际界面为准，不要误用「令牌」页中用于模型调用的 API Key。
 
-## Data and privacy
+编辑已有站点时，**令牌留空表示保留原值**；需要轮换令牌时填写新值。已保存的完整令牌不会从 Host 返回浏览器。
 
-- Site names, URLs, and tokens are stored in a DSH credential record named `newapi-usage/sites` in the local DSH home. The credential file is managed by DSH and is not part of this repository.
-- The Client sends dashboard requests to the local authenticated DSH connection route. Only the Host contacts configured NewAPI sites.
-- The plugin does not include analytics, telemetry, or a third-party proxy.
-- Requests sent to a NewAPI site include its configured access token in the `Authorization` header. Redirects are disabled, preventing a token from being forwarded to a different origin. Only add sites you trust and use tokens with the minimum permissions needed to read your own account and usage.
-- NewAPI servers may vary by version or operator configuration. Optional usage, status, or token endpoints can be unavailable; partial failures are reported in the panel.
+站点地址必须直接提供 API 响应。本插件**不跟随 HTTP 重定向**，以避免访问令牌被转发至其他地址；若遇到重定向，请填写最终的 API 站点地址。地址中也不能嵌入用户名或密码。
 
-## Usage definitions
+## 数据来源与统计口径
 
-- Spending is queried from `/api/log/self/stat` with explicit local-calendar day windows. The browser's local time zone defines the start of each day and month.
-- The seven-day chart uses seven daily stat requests. It does not use `/api/data/self`, whose aggregation may differ by NewAPI version or server configuration.
-- Currency values are calculated as `quota / quota_per_unit`; the server-provided quota rate is authoritative. When the status endpoint is unavailable, the default is 500,000 units per currency unit.
-- A dashboard snapshot is cached for up to 60 seconds. The panel refreshes automatically every two minutes while open; use **Refresh** for an immediate update.
-- Balance and account totals load first. Daily/monthly statistics and token details are loaded in the background and appear as they complete.
+| 指标 | 接口与说明 |
+| --- | --- |
+| 余额、累计消费、请求次数 | `/api/user/self` |
+| 今日、本月消费和 RPM/TPM | `/api/log/self/stat`，消费类型为 `type=2` |
+| 近 7 天消费 | 为每一天分别查询 `/api/log/self/stat` |
+| API Key 明细 | `/api/token/` |
+| 额度倍率、货币符号 | `/api/status` |
 
-## Development
+- **日期边界**：由浏览器本地时区确定每天和每月的起始时间。
+- **金额计算**：`金额 = quota / quota_per_unit`。优先采用站点返回的倍率；站点信息不可用时回退到 500,000。金额属于站点额度的换算展示，不代表实际结算汇率。
+- **趋势图**：采用每日统计接口，不使用 `/api/data/self`，因为后者的聚合方式可能随版本或站点配置变化。
+- **缓存与刷新**：快照缓存约 60 秒；打开面板时加载，停留期间每 2 分钟自动刷新，也可点击 **刷新** 主动更新。
+- **分阶段加载**：先显示账户概览，再在后台获取日/月统计与令牌明细；完成后由面板轮询补齐。
 
-The bundle has a Host module (`index.js`) and a browser module (`client.js`), plus locale resources and an icon.
+## 数据与隐私
+
+- 站点名称、地址和令牌保存在 DSH 本地凭据记录 `newapi-usage/sites` 中。凭据文件由 DSH 管理，**不属于本仓库内容**。
+- 浏览器通过本地 DSH 已鉴权的 Connection 路由请求数据；只有 Host 访问所配置的 NewAPI 站点。
+- 插件不包含统计分析、遥测或第三方代理服务。
+- 请求站点时会通过 `Authorization` 请求头发送该站点的访问令牌；请只添加可信站点，并尽量使用满足查询需求的最小权限令牌。
+- 不要把真实令牌、账户数据或本地凭据文件提交到 GitHub。
+
+## 开发与验证
+
+插件包含 Host 模块 `index.js`、浏览器模块 `client.js`、中英文语言资源和图标。插件本身无需第三方运行时依赖；React 与所需服务由 DSH 提供。
 
 ```sh
+# 检查语法
 node --check index.js
 node --check client.js
+
+# 运行回归验证
+npm run verify
 ```
 
-No third-party runtime dependency is required by the plugin. DSH provides the Client React runtime and the credential/connection services.
+验证脚本使用模拟上游响应，不需要真实站点令牌。
 
-## Security and disclaimer
+## 安全说明与免责声明
 
-Installing a plugin grants its code the permissions of the DSH Host and Client services it uses. Review the source before installing and only use trusted NewAPI sites. This software is provided **as is**, without warranties or guarantees. You are responsible for your credentials, configured endpoints, and any consequences of using or installing the plugin. Publishing code to a public repository makes it visible and copyable; remove private data before publishing. No credential or user data should be committed to this repository.
+安装插件意味着信任其源码，以及它使用的 DSH Host/Client 服务权限。安装前请审查代码，只连接可信的 NewAPI 站点。
 
-## License
+本软件按 **“现状”（AS IS）** 提供，不作任何明示或暗示担保。你需自行负责凭据安全、站点配置，以及使用或安装本插件产生的后果。
 
-MIT. See [LICENSE](LICENSE).
+将代码发布到**公开仓库（public repository）**后，内容可被任何人查看和复制。发布前请清理隐私数据；不要将任何凭据或用户数据提交到仓库。
+
+## 许可证
+
+[MIT License](LICENSE)。
