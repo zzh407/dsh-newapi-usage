@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="NewAPI usage">
+  <defs>
+    <linearGradient id="napi-plate" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16324f"/>
+      <stop offset="1" stop-color="#0b1b2b"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#napi-plate)"/>
+  <rect x="13" y="34" width="7" height="15" rx="2.5" fill="#3ddc97"/>
+  <rect x="24" y="27" width="7" height="22" rx="2.5" fill="#35c9d6"/>
+  <rect x="35" y="19" width="7" height="30" rx="2.5" fill="#4cc9f0"/>
+  <circle cx="47.5" cy="20" r="8.5" fill="#f6c445"/>
+  <path d="M47.5 15.4v9.2M44.6 18.2h5.8M44.6 21.8h5.8" stroke="#5a3d05" stroke-width="1.8" stroke-linecap="round"/>
+</svg>

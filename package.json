@@ -1,0 +1,35 @@
+{
+  "name": "dsh-newapi-usage",
+  "version": "1.0.0",
+  "description": "A DSH Web plugin for viewing NewAPI relay-site balance and usage.",
+  "engines": { "node": ">=20" },
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE",
+    "scripts/verify.mjs"
+  ],
+  "scripts": { "verify": "node scripts/verify.mjs" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  }
+}
